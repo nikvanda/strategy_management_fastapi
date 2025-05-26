@@ -3,9 +3,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import services
-from app.auth.schemas import UserSchema, ResponseTokens
+from app.auth.schemas import UserSchema, ResponseTokens, CurrentUserSchema
 from app.auth.services import authorize_user, get_user_by_username
-from app.dependencies import get_session
+from app.dependencies import get_session, CurrentUser
 
 router = APIRouter(prefix='/auth')
 
@@ -61,9 +61,9 @@ async def login(user: UserSchema, session: AsyncSession = Depends(get_session)):
     )
 
 
-@router.get('/')
-async def review_current_user():
-    pass
+@router.get('/me', response_model=CurrentUserSchema)
+async def review_current_user(current_user: CurrentUser):
+    return current_user
 
 
 @router.post('/refresh')

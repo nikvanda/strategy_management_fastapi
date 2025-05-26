@@ -9,3 +9,7 @@ class UserSchema(BaseModel):
 class ResponseTokens(BaseModel):
     access_token: str
     refresh_token: str
+
+
+class CurrentUserSchema(BaseModel):
+    username: str
