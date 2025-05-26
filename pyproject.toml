@@ -26,4 +26,4 @@ line-length = 80
 skip-string-normalization = true
 
 [tool.poetry]
-packages = [{include = "*"}]
+packages = [{include = "app"}]
