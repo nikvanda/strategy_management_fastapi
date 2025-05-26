@@ -29,12 +29,12 @@ jobs:
           curl -sSL https://install.python-poetry.org | python3 -
       # Install dependencies using Poetry
       - name: Install dependencies
-        working-directory: backend
+        working-directory: .
         run: |
           poetry install
 
       # Run linter (flake8)
       - name: Linter (flake8)
-        working-directory: backend
+        working-directory: .
         run: |
           poetry run flake8 .
