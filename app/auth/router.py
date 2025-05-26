@@ -66,6 +66,6 @@ async def review_current_user(current_user: CurrentUser):
     return current_user
 
 
-@router.post('/refresh')
+@router.post('/refresh')  # TODO: add possibility to refresh access token
 async def refresh_access_token():
     pass

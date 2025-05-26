@@ -25,21 +25,28 @@ async_session = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
 
+
 async def get_session() -> AsyncSession:
     async with async_session() as session:
         yield session
 
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)],
-                           session: AsyncSession = Depends(get_session)):
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    session: AsyncSession = Depends(get_session),
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},)
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
@@ -49,5 +56,6 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)],
     if user is None:
         raise credentials_exception
     return await user
+
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

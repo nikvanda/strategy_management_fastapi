@@ -38,7 +38,10 @@ create_refresh_token = partial(
     create_token, settings.REFRESH_TOKEN_EXPIRE_MINUTES
 )
 
-async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
+
+async def get_user_by_username(
+    session: AsyncSession, username: str
+) -> User | None:
     result = await session.execute(
         select(User).where(User.username == username)
     )

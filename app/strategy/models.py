@@ -44,7 +44,7 @@ class Strategy(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
 
-    user: Mapped["User"] = relationship(
+    user: Mapped["User"] = relationship( # noqa F821
         "User", backref=backref("strategies", cascade="all, delete-orphan")
     )
 
