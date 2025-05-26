@@ -2,6 +2,7 @@ from datetime import timedelta, datetime
 from functools import partial
 
 import jwt
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -37,6 +38,13 @@ create_refresh_token = partial(
     create_token, settings.REFRESH_TOKEN_EXPIRE_MINUTES
 )
 
+async def get_user_by_username( session: AsyncSession, username: str) -> User | None:
+    result = await session.execute(
+        select(User).where(User.username == username)
+    )
+    user = result.scalars().first()
+    return user
+
 
 async def add_user(session: AsyncSession, username: str, password: str):
     new_user = User(username, password)
@@ -44,7 +52,7 @@ async def add_user(session: AsyncSession, username: str, password: str):
     return new_user
 
 
-async def authorize_user(user: User):
-    access_token = await create_access_token(data={"sub": user.username})
-    refresh_token = await create_refresh_token(data={"sub": user.username})
+async def authorize_user(username: str):
+    access_token = await create_access_token(data={"sub": username})
+    refresh_token = await create_refresh_token(data={"sub": username})
     return {'access_token': access_token, 'refresh_token': refresh_token}
