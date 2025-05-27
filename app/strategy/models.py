@@ -11,7 +11,7 @@ class Condition(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     indicator: Mapped[str] = mapped_column(String(100), nullable=False)
-    threshold: Mapped[int] = mapped_column(Numeric(6, 2), nullable=False)
+    threshold: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
     type: Mapped[str] = mapped_column(
         Enum('buy_conditions', 'sell_conditions', name='action_type_enum'),
         nullable=False,

@@ -52,10 +52,10 @@ async def get_current_user(
             raise credentials_exception
     except InvalidTokenError:
         raise credentials_exception
-    user = get_user_by_username(session, username)
+    user = await get_user_by_username(session, username)
     if user is None:
         raise credentials_exception
-    return await user
+    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
