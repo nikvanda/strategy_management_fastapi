@@ -1,12 +1,15 @@
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import jwt
-from fastapi import HTTPException, Depends
+from aio_pika import connect_robust
+from fastapi import HTTPException, Depends, FastAPI
 from fastapi.security import OAuth2PasswordBearer
 from jwt import InvalidTokenError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from starlette import status
+import redis.asyncio as redis
 
 from app.auth.models import User
 from app.auth.services import UserService
@@ -59,3 +62,19 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+async def get_redis():
+    return redis_client
+
+RABBITMQ_URL = "amqp://guest:guest@localhost/"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.rabbitmq_connection = await connect_robust(RABBITMQ_URL)
+    app.state.channel = await app.state.rabbitmq_connection.channel()
+    await app.state.channel.declare_queue("task_queue", durable=True)
+    yield
+    await app.state.rabbitmq_connection.close()

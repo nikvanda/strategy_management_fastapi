@@ -36,3 +36,9 @@ class ConditionFormatter:
             threshold=data['threshold'],
             type=data['type'],
         )
+
+class RedisUtils:
+
+    @staticmethod
+    def get_strategy_cached_name(user_id: int):
+        return f'strategies_{user_id}'

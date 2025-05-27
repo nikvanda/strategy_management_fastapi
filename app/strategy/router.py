@@ -2,6 +2,7 @@ from typing import List
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
+from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import (
     HTTP_201_CREATED,
@@ -10,7 +11,7 @@ from starlette.status import (
     HTTP_400_BAD_REQUEST,
 )
 
-from app.dependencies import CurrentUser, get_session
+from app.dependencies import CurrentUser, get_session, get_redis
 from app.strategy.schemas import (
     StrategyInput,
     StrategyResponse,
@@ -23,7 +24,7 @@ from app.strategy.services import (
     ConditionService,
     SimulationService,
 )
-from app.strategy.utils import StrategyFormatter
+from app.strategy.utils import StrategyFormatter, RedisUtils
 
 router = APIRouter(prefix='/strategies')
 
@@ -33,6 +34,7 @@ async def create_strategy(
     current_user: CurrentUser,
     strategy: StrategyInput,
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
 ):
     if not bool(strategy.name) or not bool(strategy.asset_type):
         raise HTTPException(
@@ -49,6 +51,7 @@ async def create_strategy(
             )
         else:
             new_strategy.conditions = []
+        await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
         await session.commit()
     except ValueError as e:
         await session.rollback()
@@ -61,8 +64,13 @@ async def create_strategy(
 
 @router.get('/', response_model=List[StrategyResponse], status_code=HTTP_200_OK)
 async def get_all_strategies(
-    current_user: CurrentUser, session: AsyncSession = Depends(get_session)
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
 ):
+    cached_value = await redis.get(RedisUtils.get_strategy_cached_name(current_user.id))
+    if cached_value:
+        return cached_value
     user_strategies = await StrategyService.get_user_strategies(
         session, current_user.id
     )
@@ -70,6 +78,7 @@ async def get_all_strategies(
         StrategyFormatter.format_strategy_response(strategy)
         for strategy in user_strategies
     ]
+    await redis.set(RedisUtils.get_strategy_cached_name(current_user.id))
     return response
 
 
@@ -95,6 +104,7 @@ async def update_strategy(
     strategy: StrategyInputOptional,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
 ):
     strategy_db = await StrategyService.get_single_strategy(
         session, current_user.id, strategy_id
@@ -103,6 +113,7 @@ async def update_strategy(
         await StrategyService.update(session, strategy, strategy_db)
         await session.commit()
         await session.refresh(strategy_db)
+        await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
         return StrategyFormatter.format_strategy_response(strategy_db)
     except ValueError as e:
         await session.rollback()
@@ -117,6 +128,7 @@ async def delete_strategy(
     strategy_id,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
 ):
     strategy_db = await StrategyService.get_single_strategy(
         session, current_user.id, strategy_id
@@ -124,6 +136,7 @@ async def delete_strategy(
     try:
         await StrategyService.delete(session, strategy_db)
         await session.commit()
+        await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
     except Exception as e:
         print(e)
         await session.rollback()
