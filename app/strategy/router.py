@@ -1,5 +1,6 @@
 from typing import List
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import (
@@ -17,7 +18,11 @@ from app.strategy.schemas import (
     SimulationResult,
     StrategyInputOptional,
 )
-from app.strategy.services import StrategyService, ConditionService
+from app.strategy.services import (
+    StrategyService,
+    ConditionService,
+    SimulationService,
+)
 from app.strategy.utils import StrategyFormatter
 
 router = APIRouter(prefix='/strategies')
@@ -133,9 +138,43 @@ async def delete_strategy(
     response_model=SimulationResult,
     status_code=HTTP_200_OK,
 )
-async def get_strategy(
+async def simulate_strategy(
+    strategy_id,
     data: List[HistoricalData],
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
 ):
-    pass
+    strategy_db = await StrategyService.get_single_strategy(
+        session, current_user.id, strategy_id
+    )
+
+    df = pd.DataFrame([item.model_dump() for item in data])
+    try:
+        df['date'] = pd.to_datetime(df['date'])
+    except TypeError:
+        raise HTTPException(
+            detail='Some of your provided data does not have date.',
+            status_code=HTTP_400_BAD_REQUEST,
+        )
+    try:
+        df['momentum'] = df['close'] - df['close'].shift(1)
+    except TypeError:
+        raise HTTPException(
+            detail='Impossible to calculate momentum. Check provided data.',
+            status_code=HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        result = SimulationService.simulate_strategy(df, strategy_db)
+    except TypeError:
+        raise HTTPException(
+            detail='Some data is in incorrect format.',
+            status_code=HTTP_400_BAD_REQUEST,
+        )
+    except IndexError:
+        raise HTTPException(
+            detail='To simulate your strategy you must provide buy and sell conditions of the same type',
+            status_code=HTTP_400_BAD_REQUEST,
+        )
+
+    return result

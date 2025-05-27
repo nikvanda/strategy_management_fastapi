@@ -50,5 +50,18 @@ class Strategy(Base):
         "User", backref=backref("strategies", cascade="all, delete-orphan")
     )
 
+    def to_dict(self):
+        response = {'name': self.name,
+                    'description': self.description,
+                    'asset_type': self.asset_type,
+                    'status': self.status,
+                    'buy_conditions': [],
+                    'sell_conditions': []}
+
+        for condition in self.conditions:
+            obj = {'indicator': condition.indicator, 'threshold': condition.threshold}
+            response[condition.type].append(obj)
+        return response
+
     def __repr__(self):
         return f'Strategy: {self.name}'
