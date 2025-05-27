@@ -7,6 +7,7 @@ from app.models import Base
 
 CONDITION_TYPES = ['buy_conditions', 'sell_conditions']
 
+
 class Condition(Base):
     __tablename__ = 'condition'
 
@@ -29,7 +30,9 @@ class Condition(Base):
     def __repr__(self):
         return self.indicator
 
+
 STATUS_TYPES = ["active", "closed", "paused"]
+
 
 class Strategy(Base):
     __tablename__ = "strategy"
@@ -46,20 +49,25 @@ class Strategy(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
 
-    user: Mapped["User"] = relationship( # noqa F821
+    user: Mapped["User"] = relationship(  # noqa F821
         "User", backref=backref("strategies", cascade="all, delete-orphan")
     )
 
     def to_dict(self):
-        response = {'name': self.name,
-                    'description': self.description,
-                    'asset_type': self.asset_type,
-                    'status': self.status,
-                    'buy_conditions': [],
-                    'sell_conditions': []}
+        response = {
+            'name': self.name,
+            'description': self.description,
+            'asset_type': self.asset_type,
+            'status': self.status,
+            'buy_conditions': [],
+            'sell_conditions': [],
+        }
 
         for condition in self.conditions:
-            obj = {'indicator': condition.indicator, 'threshold': condition.threshold}
+            obj = {
+                'indicator': condition.indicator,
+                'threshold': condition.threshold,
+            }
             response[condition.type].append(obj)
         return response
 

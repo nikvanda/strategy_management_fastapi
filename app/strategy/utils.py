@@ -37,6 +37,7 @@ class ConditionFormatter:
             type=data['type'],
         )
 
+
 class RedisUtils:
 
     @staticmethod

@@ -9,7 +9,12 @@ from sqlalchemy.orm import selectinload
 from starlette.status import HTTP_400_BAD_REQUEST
 
 from app.services import ServiceFactory
-from app.strategy.models import Strategy, Condition, STATUS_TYPES, CONDITION_TYPES
+from app.strategy.models import (
+    Strategy,
+    Condition,
+    STATUS_TYPES,
+    CONDITION_TYPES,
+)
 from app.strategy.schemas import (
     StrategyInput,
     ConditionData,
@@ -114,12 +119,14 @@ class ConditionService(ServiceFactory):
             if condition.type not in CONDITION_TYPES:
                 raise ValueError('Incorrect condition types.')
 
-            new_conditions.append(cls.model(
-                indicator=condition.indicator,
-                threshold=condition.threshold,
-                type=condition.type,
-                strategy=strategy,
-            ))
+            new_conditions.append(
+                cls.model(
+                    indicator=condition.indicator,
+                    threshold=condition.threshold,
+                    type=condition.type,
+                    strategy=strategy,
+                )
+            )
 
         strategy.conditions = new_conditions
         session.add(strategy)
@@ -140,6 +147,7 @@ class ConditionService(ServiceFactory):
         if isinstance(conditions[0], Condition):
             for condition in conditions:
                 await session.delete(condition)
+
 
 class SimulationService:
 
