@@ -16,12 +16,7 @@ from app.strategy.schemas import (
     HistoricalData,
     SimulationResult,
 )
-from app.strategy.services import (
-    add_strategy,
-    add_conditions,
-    get_user_strategies,
-    get_single_strategy,
-)
+from app.strategy.services import StrategyService, ConditionService
 from app.strategy.utils import format_strategy_response
 
 router = APIRouter(prefix='/strategies')
@@ -39,8 +34,11 @@ async def create_strategy(
             detail="Name or asset_type must not be empty.",
         )
     try:
-        new_strategy = await add_strategy(session, strategy, current_user.id)
-        await add_conditions(session, strategy.conditions, new_strategy)
+        new_strategy = await StrategyService.add_strategy(session, strategy, current_user.id)
+        if strategy.conditions:
+            await ConditionService.add_conditions(session, strategy.conditions, new_strategy)
+        else:
+            new_strategy.conditions = []
         await session.commit()
     except Exception:
         await session.rollback()
@@ -55,7 +53,7 @@ async def create_strategy(
 async def get_all_strategies(
     current_user: CurrentUser, session: AsyncSession = Depends(get_session)
 ):
-    user_strategies = await get_user_strategies(session, current_user.id)
+    user_strategies = await StrategyService.get_user_strategies(session, current_user.id)
     response = [
         format_strategy_response(strategy) for strategy in user_strategies
     ]
@@ -70,7 +68,12 @@ async def get_strategy(
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
 ):
-    strategy = await get_single_strategy(session, current_user.id, strategy_id)
+    strategy = await StrategyService.get_single_strategy(session, current_user.id, strategy_id)
+    if strategy is None:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail="No such a strategy.",
+        )
     return format_strategy_response(strategy)
 
 
@@ -78,11 +81,17 @@ async def get_strategy(
     '/{strategy_id}', response_model=StrategyResponse, status_code=HTTP_200_OK
 )
 async def update_strategy(
+    strategy_id,
     strategy: StrategyInput,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
 ):
-    pass
+    strategy = await StrategyService.get_single_strategy(session, current_user.id, strategy_id)
+    if strategy is None:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail="No such a strategy.",
+        )
 
 
 @router.delete('/{strategy_id}', status_code=HTTP_204_NO_CONTENT)

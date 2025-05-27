@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette import status
 
 from app.auth.models import User
-from app.auth.services import get_user_by_username
+from app.auth.services import UserService
 from app.config import settings
 
 DATABASE_URL = (
@@ -52,7 +52,7 @@ async def get_current_user(
             raise credentials_exception
     except InvalidTokenError:
         raise credentials_exception
-    user = await get_user_by_username(session, username)
+    user = await UserService.get_user_by_username(session, username)
     if user is None:
         raise credentials_exception
     return user

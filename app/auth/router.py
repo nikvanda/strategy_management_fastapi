@@ -2,9 +2,8 @@ from fastapi import APIRouter, status, HTTPException, Depends
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import services
 from app.auth.schemas import UserSchema, ResponseTokens, CurrentUserSchema
-from app.auth.services import authorize_user, get_user_by_username
+from app.auth.services import UserService
 from app.dependencies import get_session, CurrentUser
 
 router = APIRouter(prefix='/auth')
@@ -20,9 +19,9 @@ async def register_user(
 ):
     if user.username and user.password:
         try:
-            await services.add_user(session, user.username, user.password)
+            await UserService.add_user(session, user.username, user.password)
             await session.commit()
-            return await authorize_user(user.username)
+            return await UserService.authorize_user(user.username)
         except IntegrityError:
             await session.rollback()
             raise HTTPException(
@@ -43,7 +42,7 @@ async def register_user(
 )
 async def login(user: UserSchema, session: AsyncSession = Depends(get_session)):
     db_user = (
-        await get_user_by_username(session, user.username)
+        await UserService.get_user_by_username(session, user.username)
         if user.username
         else None
     )
@@ -53,7 +52,7 @@ async def login(user: UserSchema, session: AsyncSession = Depends(get_session)):
             detail="No such a user.",
         )
     if db_user.check_password(user.password):
-        tokens = await authorize_user(user.username)
+        tokens = await UserService.authorize_user(user.username)
         return tokens
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,

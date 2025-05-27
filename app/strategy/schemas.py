@@ -14,12 +14,12 @@ class ConditionData(BaseCondition):
 
 class BaseStrategy(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: Optional[str] | None = None
     asset_type: str
 
 
 class StrategyInput(BaseStrategy):
-    conditions: List[ConditionData]
+    conditions: List[ConditionData] | None = None
 
 
 class StrategyResponse(BaseStrategy):
