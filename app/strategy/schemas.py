@@ -16,6 +16,18 @@ class BaseStrategy(BaseModel):
     name: str
     description: Optional[str] | None = None
     asset_type: str
+    status: str
+
+
+class BaseStrategyOptional(BaseModel):
+    name: str | None = None
+    description: Optional[str] | None = None
+    asset_type: str | None = None
+    status: str | None = None
+
+
+class StrategyInputOptional(BaseStrategyOptional):
+    conditions: List[ConditionData] | None = None
 
 
 class StrategyInput(BaseStrategy):

@@ -1,12 +1,19 @@
 from typing import List
 
-from sqlalchemy import select, and_
+from fastapi import HTTPException
+from sqlalchemy import select, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.status import HTTP_400_BAD_REQUEST
 
 from app.services import ServiceFactory
-from app.strategy.models import Strategy, Condition
-from app.strategy.schemas import StrategyInput, ConditionData
+from app.strategy.models import Strategy, Condition, STATUS_TYPES, CONDITION_TYPES
+from app.strategy.schemas import (
+    StrategyInput,
+    ConditionData,
+    StrategyInputOptional,
+)
+from app.strategy.utils import ConditionFormatter
 
 
 class StrategyService(ServiceFactory):
@@ -29,6 +36,32 @@ class StrategyService(ServiceFactory):
         return new_strategy
 
     @classmethod
+    async def update(
+        cls,
+        session: AsyncSession,
+        strategy_input: StrategyInputOptional,
+        strategy: Strategy,
+    ):
+        for key, value in strategy_input.model_dump(exclude_unset=True).items():
+            if key == 'conditions':
+                await ConditionService.delete(session, strategy.conditions)
+                formatted_value = [
+                    ConditionFormatter.condition_data_formatter(item)
+                    for item in value
+                ]
+                await ConditionService.add_conditions(
+                    session, formatted_value, strategy
+                )
+                continue
+            if key == 'status':
+                if value not in STATUS_TYPES:
+                    raise ValueError('Incorrect status type.')
+
+            setattr(strategy, key, value)
+
+        return strategy_input
+
+    @classmethod
     async def get_user_strategies(cls, session: AsyncSession, user_id: int):
         result = await session.execute(
             select(cls.model)
@@ -46,14 +79,17 @@ class StrategyService(ServiceFactory):
         result = await session.execute(
             select(cls.model)
             .where(
-                and_(
-                    cls.model.user_id == user_id, cls.model.id == strategy_id
-                )
+                and_(cls.model.user_id == user_id, cls.model.id == strategy_id)
             )
             .options(selectinload(cls.model.conditions))
         )
 
         strategy = result.scalars().first()
+        if strategy is None:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="No such a strategy.",
+            )
         return strategy
 
 
@@ -67,14 +103,34 @@ class ConditionService(ServiceFactory):
         conditions: List[ConditionData],
         strategy: Strategy,
     ):
-        strategy.conditions = [
-            cls.model(
+        new_conditions = []
+        for condition in conditions:
+            if condition.type not in CONDITION_TYPES:
+                raise ValueError('Incorrect condition types.')
+
+            new_conditions.append(cls.model(
                 indicator=condition.indicator,
                 threshold=condition.threshold,
                 type=condition.type,
                 strategy=strategy,
-            )
-            for condition in conditions
-        ]
+            ))
+
+        strategy.conditions = new_conditions
         session.add(strategy)
         return strategy
+
+    @classmethod
+    async def delete(
+        cls, session: AsyncSession, conditions: list[int] | list[Condition]
+    ):
+        if not conditions:
+            return
+
+        if isinstance(conditions[0], int):
+            await session.execute(
+                delete(Strategy).where(Strategy.id.in_(conditions))
+            )
+
+        if isinstance(conditions[0], Condition):
+            for condition in conditions:
+                await session.delete(condition)

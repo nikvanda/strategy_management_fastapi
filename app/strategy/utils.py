@@ -1,5 +1,5 @@
 from app.strategy.models import Strategy
-from app.strategy.schemas import StrategyResponse, BaseCondition
+from app.strategy.schemas import StrategyResponse, BaseCondition, ConditionData
 
 
 def format_strategy_response(strategy: Strategy) -> StrategyResponse:
@@ -21,4 +21,16 @@ def format_strategy_response(strategy: Strategy) -> StrategyResponse:
             for condition in strategy.conditions
             if condition.type == 'buy_conditions'
         ],
+        status=strategy.status,
     )
+
+
+class ConditionFormatter:
+
+    @staticmethod
+    def condition_data_formatter(data: dict):
+        return ConditionData(
+            indicator=data['indicator'],
+            threshold=data['threshold'],
+            type=data['type'],
+        )

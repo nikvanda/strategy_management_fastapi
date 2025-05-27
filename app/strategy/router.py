@@ -15,6 +15,7 @@ from app.strategy.schemas import (
     StrategyResponse,
     HistoricalData,
     SimulationResult,
+    StrategyInputOptional,
 )
 from app.strategy.services import StrategyService, ConditionService
 from app.strategy.utils import format_strategy_response
@@ -34,17 +35,21 @@ async def create_strategy(
             detail="Name or asset_type must not be empty.",
         )
     try:
-        new_strategy = await StrategyService.add_strategy(session, strategy, current_user.id)
+        new_strategy = await StrategyService.add_strategy(
+            session, strategy, current_user.id
+        )
         if strategy.conditions:
-            await ConditionService.add_conditions(session, strategy.conditions, new_strategy)
+            await ConditionService.add_conditions(
+                session, strategy.conditions, new_strategy
+            )
         else:
             new_strategy.conditions = []
         await session.commit()
-    except Exception:
+    except ValueError as e:
         await session.rollback()
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
-            detail="Unpredictable error.",
+            detail=str(e),
         )
     return format_strategy_response(new_strategy)
 
@@ -53,7 +58,9 @@ async def create_strategy(
 async def get_all_strategies(
     current_user: CurrentUser, session: AsyncSession = Depends(get_session)
 ):
-    user_strategies = await StrategyService.get_user_strategies(session, current_user.id)
+    user_strategies = await StrategyService.get_user_strategies(
+        session, current_user.id
+    )
     response = [
         format_strategy_response(strategy) for strategy in user_strategies
     ]
@@ -68,12 +75,9 @@ async def get_strategy(
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
 ):
-    strategy = await StrategyService.get_single_strategy(session, current_user.id, strategy_id)
-    if strategy is None:
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail="No such a strategy.",
-        )
+    strategy = await StrategyService.get_single_strategy(
+        session, current_user.id, strategy_id
+    )
     return format_strategy_response(strategy)
 
 
@@ -82,15 +86,23 @@ async def get_strategy(
 )
 async def update_strategy(
     strategy_id,
-    strategy: StrategyInput,
+    strategy: StrategyInputOptional,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
 ):
-    strategy = await StrategyService.get_single_strategy(session, current_user.id, strategy_id)
-    if strategy is None:
+    strategy_db = await StrategyService.get_single_strategy(
+        session, current_user.id, strategy_id
+    )
+    try:
+        await StrategyService.update(session, strategy, strategy_db)
+        await session.commit()
+        await session.refresh(strategy_db)
+        return format_strategy_response(strategy_db)
+    except ValueError as e:
+        await session.rollback()
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
-            detail="No such a strategy.",
+            detail=str(e),
         )
 
 
