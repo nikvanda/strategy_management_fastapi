@@ -175,5 +175,4 @@ cython_debug/
 
 poetry.lock
 *.sqlite3
-migration/versions/
 postgres_data
