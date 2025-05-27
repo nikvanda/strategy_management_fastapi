@@ -68,17 +68,23 @@ async def get_all_strategies(
     session: AsyncSession = Depends(get_session),
     redis: Redis = Depends(get_redis),
 ):
-    cached_value = await redis.get(RedisUtils.get_strategy_cached_name(current_user.id))
-    if cached_value:
-        return cached_value
-    user_strategies = await StrategyService.get_user_strategies(
-        session, current_user.id
+    cached_value = await redis.get(
+        RedisUtils.get_strategy_cached_name(current_user.id)
+    )
+
+    user_strategies = (
+        cached_value
+        if cached_value
+        else await StrategyService.get_user_strategies(session, current_user.id)
     )
     response = [
         StrategyFormatter.format_strategy_response(strategy)
         for strategy in user_strategies
     ]
-    await redis.set(RedisUtils.get_strategy_cached_name(current_user.id))
+    await redis.set(
+        RedisUtils.get_strategy_cached_name(current_user.id), user_strategies
+    )
+
     return response
 
 
