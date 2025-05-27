@@ -86,4 +86,4 @@ async def refresh_access_token(
     access_token = await TokenService.create_access_token(
         data={"sub": user.username}
     )
-    return access_token
+    return Token(token=access_token)
