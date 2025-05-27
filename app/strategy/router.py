@@ -18,7 +18,7 @@ from app.strategy.schemas import (
     StrategyInputOptional,
 )
 from app.strategy.services import StrategyService, ConditionService
-from app.strategy.utils import format_strategy_response
+from app.strategy.utils import StrategyFormatter
 
 router = APIRouter(prefix='/strategies')
 
@@ -51,7 +51,7 @@ async def create_strategy(
             status_code=HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    return format_strategy_response(new_strategy)
+    return StrategyFormatter.format_strategy_response(new_strategy)
 
 
 @router.get('/', response_model=List[StrategyResponse], status_code=HTTP_200_OK)
@@ -62,7 +62,8 @@ async def get_all_strategies(
         session, current_user.id
     )
     response = [
-        format_strategy_response(strategy) for strategy in user_strategies
+        StrategyFormatter.format_strategy_response(strategy)
+        for strategy in user_strategies
     ]
     return response
 
@@ -78,7 +79,7 @@ async def get_strategy(
     strategy = await StrategyService.get_single_strategy(
         session, current_user.id, strategy_id
     )
-    return format_strategy_response(strategy)
+    return StrategyFormatter.format_strategy_response(strategy)
 
 
 @router.patch(
@@ -97,7 +98,7 @@ async def update_strategy(
         await StrategyService.update(session, strategy, strategy_db)
         await session.commit()
         await session.refresh(strategy_db)
-        return format_strategy_response(strategy_db)
+        return StrategyFormatter.format_strategy_response(strategy_db)
     except ValueError as e:
         await session.rollback()
         raise HTTPException(
@@ -108,9 +109,23 @@ async def update_strategy(
 
 @router.delete('/{strategy_id}', status_code=HTTP_204_NO_CONTENT)
 async def delete_strategy(
-    current_user: CurrentUser, session: AsyncSession = Depends(get_session)
+    strategy_id,
+    current_user: CurrentUser,
+    session: AsyncSession = Depends(get_session),
 ):
-    pass
+    strategy_db = await StrategyService.get_single_strategy(
+        session, current_user.id, strategy_id
+    )
+    try:
+        await StrategyService.delete(session, strategy_db)
+        await session.commit()
+    except Exception as e:
+        print(e)
+        await session.rollback()
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail='Unpredictable error',
+        )
 
 
 @router.post(

@@ -92,6 +92,10 @@ class StrategyService(ServiceFactory):
             )
         return strategy
 
+    @classmethod
+    async def delete(cls, session: AsyncSession, strategy: Strategy):
+        await session.delete(strategy)
+
 
 class ConditionService(ServiceFactory):
     model = Condition
