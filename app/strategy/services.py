@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 from typing import List
 
 import pandas as pd
@@ -81,12 +81,12 @@ class StrategyService(ServiceFactory):
 
     @classmethod
     async def get_single_strategy(
-        cls, session: AsyncSession, user_id: int, strategy_id: int
+        cls, session: AsyncSession, user_id: int, strategy_id: int | str
     ):
         result = await session.execute(
             select(cls.model)
             .where(
-                and_(cls.model.user_id == user_id, cls.model.id == strategy_id)
+                and_(cls.model.user_id == user_id, cls.model.id == int(strategy_id))
             )
             .options(selectinload(cls.model.conditions))
         )
@@ -172,8 +172,8 @@ class SimulationService:
         )[0]
 
         for index, row in df.iterrows():
-            momentum = Decimal(row[indicator])
-            close_price = Decimal(row['close'])
+            momentum = float(row[indicator])
+            close_price = float(row['close'])
             try:
                 if (
                     momentum > st_dict['buy_conditions']['threshold']

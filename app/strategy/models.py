@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import String, Numeric, Enum, ForeignKey
+from sqlalchemy import String, Enum, ForeignKey, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship, backref
 
 from app.models import Base
@@ -13,7 +13,7 @@ class Condition(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     indicator: Mapped[str] = mapped_column(String(100), nullable=False)
-    threshold: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    threshold: Mapped[float] = mapped_column(Float(), nullable=False)
     type: Mapped[str] = mapped_column(
         Enum(*CONDITION_TYPES, name='action_type_enum'),
         nullable=False,

@@ -1,6 +1,9 @@
+import json
 from typing import List
 
+import aio_pika
 import pandas as pd
+from aio_pika import RobustChannel
 from fastapi import APIRouter, Depends, HTTPException
 from redis import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +14,13 @@ from starlette.status import (
     HTTP_400_BAD_REQUEST,
 )
 
-from app.dependencies import CurrentUser, get_session, get_redis
+from app.dependencies import (
+    CurrentUser,
+    get_session,
+    get_redis,
+    QUEUE_NAME,
+    get_rabbitmq_channel,
+)
 from app.strategy.schemas import (
     StrategyInput,
     StrategyResponse,
@@ -35,6 +44,7 @@ async def create_strategy(
     strategy: StrategyInput,
     session: AsyncSession = Depends(get_session),
     redis: Redis = Depends(get_redis),
+    channel: RobustChannel = Depends(get_rabbitmq_channel),
 ):
     if not bool(strategy.name) or not bool(strategy.asset_type):
         raise HTTPException(
@@ -59,6 +69,14 @@ async def create_strategy(
             status_code=HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+    await channel.default_exchange.publish(
+        aio_pika.Message(
+            body=json.dumps(
+                f'User {current_user.username} created strategy {new_strategy.name}'
+            ).encode()
+        ),
+        routing_key=QUEUE_NAME,
+    )
     return StrategyFormatter.format_strategy_response(new_strategy)
 
 
@@ -71,18 +89,18 @@ async def get_all_strategies(
     cached_value = await redis.get(
         RedisUtils.get_strategy_cached_name(current_user.id)
     )
+    if cached_value:
+        return json.loads(cached_value)
 
-    user_strategies = (
-        cached_value
-        if cached_value
-        else await StrategyService.get_user_strategies(session, current_user.id)
-    )
+    user_strategies = await StrategyService.get_user_strategies(session, current_user.id)
+
     response = [
         StrategyFormatter.format_strategy_response(strategy)
         for strategy in user_strategies
     ]
     await redis.set(
-        RedisUtils.get_strategy_cached_name(current_user.id), user_strategies
+        RedisUtils.get_strategy_cached_name(current_user.id),
+        json.dumps([st.to_dict() for st in user_strategies]),
     )
 
     return response
@@ -111,6 +129,7 @@ async def update_strategy(
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
     redis: Redis = Depends(get_redis),
+    channel: aio_pika.RobustChannel = Depends(get_rabbitmq_channel),
 ):
     strategy_db = await StrategyService.get_single_strategy(
         session, current_user.id, strategy_id
@@ -120,6 +139,14 @@ async def update_strategy(
         await session.commit()
         await session.refresh(strategy_db)
         await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
+        await channel.default_exchange.publish(
+            aio_pika.Message(
+                body=json.dumps(
+                    f'User {current_user.username} updated strategy {strategy_db.name}'
+                ).encode()
+            ),
+            routing_key=QUEUE_NAME,
+        )
         return StrategyFormatter.format_strategy_response(strategy_db)
     except ValueError as e:
         await session.rollback()

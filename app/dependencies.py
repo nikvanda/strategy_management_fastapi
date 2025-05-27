@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import jwt
-from aio_pika import connect_robust
+from aio_pika import RobustChannel, RobustConnection, connect_robust
 from fastapi import HTTPException, Depends, FastAPI
 from fastapi.security import OAuth2PasswordBearer
 from jwt import InvalidTokenError
@@ -15,12 +15,7 @@ from app.auth.models import User
 from app.auth.services import UserService
 from app.config import settings
 
-DATABASE_URL = (
-    f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}@"
-    f"{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
-    if settings.DEBUG == 0
-    else 'sqlite+aiosqlite:///../mydb.sqlite3'
-)
+DATABASE_URL = f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 
@@ -70,13 +65,25 @@ async def get_redis():
     return redis_client
 
 
-RABBITMQ_URL = "amqp://guest:guest@localhost/"
+RABBITMQ_URL = "amqp://guest:guest@rabbitmq:5672/"
+QUEUE_NAME = "task_queue"
+
+
+_connection: RobustConnection | None = None
+_channel: RobustChannel | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.rabbitmq_connection = await connect_robust(RABBITMQ_URL)
-    app.state.channel = await app.state.rabbitmq_connection.channel()
-    await app.state.channel.declare_queue("task_queue", durable=True)
+    global _connection, _channel
+    _connection = await connect_robust(RABBITMQ_URL)
+    _channel = await _connection.channel()
+    await _channel.declare_queue(QUEUE_NAME, durable=True)
     yield
-    await app.state.rabbitmq_connection.close()
+    await _connection.close()
+
+
+async def get_rabbitmq_channel() -> RobustChannel:
+    if _channel is None:
+        raise HTTPException(status_code=500, detail="RabbitMQ channel is not initialized")
+    return _channel
