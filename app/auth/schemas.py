@@ -13,3 +13,6 @@ class ResponseTokens(BaseModel):
 
 class CurrentUserSchema(BaseModel):
     username: str
+
+class Token(BaseModel):
+    token: str

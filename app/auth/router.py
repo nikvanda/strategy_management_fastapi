@@ -2,9 +2,14 @@ from fastapi import APIRouter, status, HTTPException, Depends
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.schemas import UserSchema, ResponseTokens, CurrentUserSchema
-from app.auth.services import UserService
-from app.dependencies import get_session, CurrentUser
+from app.auth.schemas import (
+    UserSchema,
+    ResponseTokens,
+    CurrentUserSchema,
+    Token,
+)
+from app.auth.services import UserService, TokenService
+from app.dependencies import get_session, CurrentUser, get_current_user
 
 router = APIRouter(prefix='/auth')
 
@@ -60,11 +65,25 @@ async def login(user: UserSchema, session: AsyncSession = Depends(get_session)):
     )
 
 
-@router.get('/me', response_model=CurrentUserSchema)
+@router.get(
+    '/me',
+    response_model=CurrentUserSchema,
+    status_code=status.HTTP_200_OK,
+)
 async def review_current_user(current_user: CurrentUser):
     return current_user
 
 
-@router.post('/refresh')  # TODO: add possibility to refresh access token
-async def refresh_access_token():
-    pass
+@router.post(
+    '/refresh',
+    response_model=Token,
+    status_code=status.HTTP_200_OK,
+)
+async def refresh_access_token(
+    token: Token, session: AsyncSession = Depends(get_session)
+):
+    user = await get_current_user(token.token, session)
+    access_token = await TokenService.create_access_token(
+        data={"sub": user.username}
+    )
+    return access_token
