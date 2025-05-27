@@ -15,12 +15,12 @@ from app.strategy.schemas import (
     StrategyResponse,
     HistoricalData,
     SimulationResult,
-    BaseCondition,
 )
 from app.strategy.services import (
     add_strategy,
     add_conditions,
     get_user_strategies,
+    get_single_strategy,
 )
 from app.strategy.utils import format_strategy_response
 
@@ -66,10 +66,12 @@ async def get_all_strategies(
     '/{strategy_id}', response_model=StrategyResponse, status_code=HTTP_200_OK
 )
 async def get_strategy(
+    strategy_id,
     current_user: CurrentUser,
     session: AsyncSession = Depends(get_session),
 ):
-    pass
+    strategy = await get_single_strategy(session, current_user.id, strategy_id)
+    return format_strategy_response(strategy)
 
 
 @router.patch(
