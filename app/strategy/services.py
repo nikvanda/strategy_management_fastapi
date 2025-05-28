@@ -2,13 +2,15 @@ from decimal import InvalidOperation
 from typing import List
 
 import pandas as pd
-from fastapi import HTTPException
 from sqlalchemy import select, and_, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from starlette.status import HTTP_400_BAD_REQUEST
 
 from app.services import ServiceFactory
+from app.strategy.exeptions import IncorrectConditionTypeError, IncorrectStatusTypesError, InvalidConditionData, \
+    InvalidStrategyField, StrategyNotExistError, InvalidConditionDataStructureError, \
+    ConditionFailToCreateError
 from app.strategy.models import (
     Strategy,
     Condition,
@@ -31,57 +33,72 @@ class ConditionService(ServiceFactory):
             conditions: List[ConditionData],
             strategy: Strategy,
     ):
-        new_conditions = []
-        for condition in conditions:
-            if condition.type not in CONDITION_TYPES:
-                raise ValueError('Incorrect condition types.')
+        try:
+            new_conditions = []
+            for condition in conditions:
+                if condition.type not in CONDITION_TYPES:
+                    raise IncorrectConditionTypeError()
 
-            new_conditions.append(
-                self.model(
-                    indicator=condition.indicator,
-                    threshold=condition.threshold,
-                    type=condition.type,
-                    strategy=strategy,
-                )
-            )
+                try:
+                    new_conditions.append(
+                        self.model(
+                            indicator=condition.indicator,
+                            threshold=condition.threshold,
+                            type=condition.type,
+                            strategy=strategy,
+                        )
+                    )
+                except IntegrityError:
+                    raise ConditionFailToCreateError(condition_data=condition)
 
-        strategy.conditions = new_conditions
-        self.session.add(strategy)
-        return strategy
+            strategy.conditions = new_conditions
+            self.session.add(strategy)
+            return strategy
+        except IncorrectConditionTypeError as e:
+            raise e
+
 
     async def delete(self, conditions: list[int] | list[Condition]):
-        if not conditions:
-            return
+        try:
+            if not conditions:
+                return
 
-        if isinstance(conditions[0], int):
-            await self.session.execute(
-                delete(Strategy).where(Strategy.id.in_(conditions))
-            )
+            if isinstance(conditions[0], int):
+                await self.session.execute(
+                    delete(Strategy).where(Strategy.id.in_(conditions))
+                )
+                return
 
-        if isinstance(conditions[0], Condition):
-            for condition in conditions:
-                await self.session.delete(condition)
+            if isinstance(conditions[0], Condition):
+                for condition in conditions:
+                    await self.session.delete(condition)
+                return
+
+            raise InvalidConditionDataStructureError(structure_type=str(type(conditions)))
+
+        except InvalidConditionDataStructureError as e:
+            raise e
 
 
 class StrategyService(ServiceFactory):
     model = Strategy
 
     async def get_single_strategy(self, user_id: int, strategy_id: int | str) -> Strategy:
-        result = await self.session.execute(
-            select(self.model)
-            .where(
-                and_(self.model.user_id == user_id, self.model.id == int(strategy_id))
+        try:
+            result = await self.session.execute(
+                select(self.model)
+                .where(
+                    and_(self.model.user_id == user_id, self.model.id == int(strategy_id))
+                )
+                .options(selectinload(self.model.conditions))
             )
-            .options(selectinload(self.model.conditions))
-        )
 
-        strategy = result.scalars().first()
-        if strategy is None:
-            raise HTTPException(
-                status_code=HTTP_400_BAD_REQUEST,
-                detail="No such a strategy.",
-            )
-        return strategy
+            strategy = result.scalars().first()
+            if strategy is None:
+                raise StrategyNotExistError()
+            return strategy
+        except StrategyNotExistError as e:
+            raise e
 
     async def get_user_strategies(self, user_id: int):
         result = await self.session.execute(
@@ -121,43 +138,60 @@ class SingleStrategyService(StrategyService):
         self._strategy = strategy if strategy else None
         self.condition_service = ConditionService(session) if strategy or (strategy_id and user_id) else None
 
-
     async def get_instance(self):
-        return self._strategy if self._strategy else await self.get_single_strategy(self.user_id, self.strategy_id)
+        try:
+            return self._strategy if self._strategy else await self.get_single_strategy(self.user_id, self.strategy_id)
+        except StrategyNotExistError as e:
+            raise e
 
     async def update(self, strategy_input: StrategyInputOptional):
-        strategy = await self.get_instance()
-        for key, value in strategy_input.model_dump(exclude_unset=True).items():
-            if key == 'conditions':
-                await self.condition_service.delete(strategy.conditions)
-                formatted_value = [
-                    ConditionFormatter.condition_data_formatter(item)
-                    for item in value
-                ]
-                await self.condition_service.add_conditions(formatted_value, strategy)
-                continue
-            if key == 'status':
-                if value not in STATUS_TYPES:
-                    raise ValueError('Incorrect status type.')
+        try:
+            strategy = await self.get_instance()
+            for key, value in strategy_input.model_dump(exclude_unset=True).items():
+                if key == 'conditions':
+                    await self.condition_service.delete(strategy.conditions)
+                    formatted_value = [
+                        ConditionFormatter(item).condition_data_formatter()
+                        for item in value
+                    ]
+                    await self.condition_service.add_conditions(formatted_value, strategy)
+                    continue
+                if key == 'status':
+                    if value not in STATUS_TYPES:
+                        raise IncorrectStatusTypesError()
 
-            setattr(strategy, key, value)
+                if hasattr(strategy, key) is False:
+                    raise InvalidStrategyField(key)
 
-        return strategy
+                setattr(strategy, key, value)
+
+            return strategy
+        except (InvalidConditionData, IncorrectStatusTypesError, InvalidStrategyField,
+                InvalidConditionDataStructureError) as e:
+            raise e
 
     async def delete(self):
-        strategy = await self.get_instance()
-        await self.session.delete(strategy)
+        try:
+            strategy = await self.get_instance()
+            if strategy is None:
+                raise StrategyNotExistError()
+            await self.session.delete(strategy)
+        except StrategyNotExistError as e:
+            raise e
 
 
 class SimulationService(SingleStrategyService):
 
     async def simulate_strategy(self,
-                          df: pd.DataFrame, indicator: str = 'momentum'
-                          ):
+                                df: pd.DataFrame, indicator: str = 'momentum'
+                                ):
         balance, position, entry_price = 0, 0, 0
         trades = []
 
-        strategy = await self.get_instance()
+        try:
+            strategy = await self.get_instance()
+        except StrategyNotExistError as e:
+            raise e
         st_dict = strategy.to_dict()
         st_dict['buy_conditions'] = list(
             filter(

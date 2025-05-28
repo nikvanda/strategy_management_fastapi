@@ -2,7 +2,9 @@ from datetime import timedelta, datetime
 
 import jwt
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
+from app.auth.exeptions import UserNotExists, UsernameIsDoubleError, JWTError
 from app.auth.models import User
 from app.config import settings
 from app.services import ServiceFactory
@@ -18,11 +20,16 @@ class SingleUserService(UserService):
         self.username = username
 
     async def get_user(self) -> User:
-        result = await self.session.execute(
-            select(self.model).where(self.model.username == self.username)
-        )
-        user = result.scalars().first()
-        return user
+        try:
+            result = await self.session.execute(
+                select(self.model).where(self.model.username == self.username)
+            )
+            user = result.scalars().first()
+            if not user:
+                raise UserNotExists(self.username)
+            return user
+        except UserNotExists as e:
+            raise e
 
 
 class AuthenticationUserService(SingleUserService):
@@ -42,24 +49,31 @@ class AuthenticationUserService(SingleUserService):
             )
             return encoded_jwt
         except jwt.ExpiredSignatureError:
-            print("Error: JWT token expired.")
-            raise
+            raise JWTError("Error: JWT token expired.")
         except jwt.PyJWTError as e:
-            print(f"Error creating JWT: {e}")
-            raise
+            raise JWTError(f"Error creating JWT: {e}")
 
     async def authorize_user(self):
-        access_token = await self.create_access_token()
-        refresh_token = await self.create_refresh_token()
-        return {'access_token': access_token, 'refresh_token': refresh_token}
+        try:
+            access_token = await self.create_access_token()
+            refresh_token = await self.create_refresh_token()
+            return {'access_token': access_token, 'refresh_token': refresh_token}
+        except JWTError as e:
+            raise e
 
     async def create_access_token(self,
                                   expires_delta: int = settings.ACCESS_TOKEN_EXPIRE_MINUTES):
-        return await self._create_token(expires_delta)
+        try:
+            return await self._create_token(expires_delta)
+        except JWTError as e:
+            raise e
 
     async def create_refresh_token(self,
                                    expires_delta: int = settings.REFRESH_TOKEN_EXPIRE_MINUTES):
-        return await self._create_token(expires_delta)
+        try:
+            return await self._create_token(expires_delta)
+        except JWTError as e:
+            raise e
 
 
 class GlobalUserService(UserService):

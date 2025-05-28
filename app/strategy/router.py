@@ -6,6 +6,7 @@ import pandas as pd
 from aio_pika import RobustChannel
 from fastapi import APIRouter, Depends, HTTPException
 from redis import Redis
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import (
     HTTP_201_CREATED,
@@ -21,6 +22,7 @@ from app.dependencies import (
     QUEUE_NAME,
     get_rabbitmq_channel,
 )
+from app.strategy.exeptions import BaseConditionError, BaseStrategyError, StrategyNotExistError, StrategyCreationError
 from app.strategy.schemas import (
     StrategyInput,
     StrategyResponse,
@@ -59,10 +61,14 @@ async def create_strategy(
             await condition_service.add_conditions(strategy.conditions, new_strategy)
         else:
             new_strategy.conditions = []
-        await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
-        await session.commit()
-    except ValueError as e:
+        await redis.delete(RedisUtils(current_user.id).get_strategy_cached_name())
+        try:
+            await session.commit()
+        except IntegrityError:
+            raise StrategyCreationError(strategy_data=strategy, user_id=current_user.id)
+    except (BaseConditionError, BaseStrategyError) as e:
         await session.rollback()
+        print(e)
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -75,7 +81,7 @@ async def create_strategy(
         ),
         routing_key=QUEUE_NAME,
     )
-    return StrategyFormatter.format_strategy_response(new_strategy)
+    return StrategyFormatter(new_strategy).format_strategy_response()
 
 
 @router.get('/', response_model=List[StrategyResponse], status_code=HTTP_200_OK)
@@ -84,8 +90,9 @@ async def get_all_strategies(
         session: AsyncSession = Depends(get_session),
         redis: Redis = Depends(get_redis),
 ):
+    redis_utils = RedisUtils(current_user.id)
     cached_value = await redis.get(
-        RedisUtils.get_strategy_cached_name(current_user.id)
+        redis_utils.get_strategy_cached_name()
     )
     if cached_value:
         return json.loads(cached_value)
@@ -94,11 +101,11 @@ async def get_all_strategies(
     user_strategies = await strategy_service.get_user_strategies(current_user.id)
 
     response = [
-        StrategyFormatter.format_strategy_response(strategy)
+        StrategyFormatter(strategy).format_strategy_response()
         for strategy in user_strategies
     ]
     await redis.set(
-        RedisUtils.get_strategy_cached_name(current_user.id),
+        redis_utils.get_strategy_cached_name(),
         json.dumps([st.to_dict() for st in user_strategies]),
     )
 
@@ -113,9 +120,15 @@ async def get_strategy(
         current_user: CurrentUser,
         session: AsyncSession = Depends(get_session),
 ):
-    strategy_service = StrategyService(session)
-    strategy = await strategy_service.get_single_strategy(current_user.id, strategy_id)
-    return StrategyFormatter.format_strategy_response(strategy)
+    try:
+        strategy_service = StrategyService(session)
+        strategy = await strategy_service.get_single_strategy(current_user.id, strategy_id)
+        return StrategyFormatter(strategy).format_strategy_response()
+    except StrategyNotExistError as e:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.patch(
@@ -134,7 +147,7 @@ async def update_strategy(
         strategy = await strategy_service.update(strategy_input)
         await session.commit()
         await session.refresh(strategy)
-        await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
+        await redis.delete(RedisUtils(current_user.id).get_strategy_cached_name())
         await channel.default_exchange.publish(
             aio_pika.Message(
                 body=json.dumps(
@@ -143,8 +156,9 @@ async def update_strategy(
             ),
             routing_key=QUEUE_NAME,
         )
-        return StrategyFormatter.format_strategy_response(strategy)
-    except ValueError as e:
+        strategy_formatter = StrategyFormatter(strategy)
+        return strategy_formatter.format_strategy_response()
+    except (BaseConditionError, BaseStrategyError) as e:
         await session.rollback()
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
@@ -163,13 +177,12 @@ async def delete_strategy(
     try:
         await strategy_service.delete()
         await session.commit()
-        await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
-    except Exception as e:
-        print(e)
+        await redis.delete(RedisUtils(current_user.id).get_strategy_cached_name())
+    except StrategyNotExistError as e:
         await session.rollback()
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
-            detail='Unpredictable error',
+            detail=str(e),
         )
 
 
@@ -184,8 +197,13 @@ async def simulate_strategy(
         current_user: CurrentUser,
         session: AsyncSession = Depends(get_session),
 ):
-    strategy_service = SimulationService(session, strategy_id=strategy_id, user_id=current_user.id)
-
+    try:
+        strategy_service = SimulationService(session, strategy_id=strategy_id, user_id=current_user.id)
+    except StrategyNotExistError as e:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     df = pd.DataFrame([item.model_dump() for item in data])
     try:
         df['date'] = pd.to_datetime(df['date'])

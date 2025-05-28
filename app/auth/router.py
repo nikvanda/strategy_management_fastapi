@@ -2,6 +2,7 @@ from fastapi import APIRouter, status, HTTPException, Depends
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.exeptions import UserNotExists, IncorrectPasswordError, BaseUserException, JWTError, UsernameIsDoubleError
 from app.auth.schemas import (
     UserSchema,
     ResponseTokens,
@@ -26,14 +27,17 @@ async def register_user(
         try:
             global_user_service = GlobalUserService(session)
             await global_user_service.add_user(user_input.username, user_input.password)
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                raise UsernameIsDoubleError()
             authentication_service = AuthenticationUserService(user_input.username, session)
             return await authentication_service.authorize_user()
-        except IntegrityError:
+        except UsernameIsDoubleError as e:
             await session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username has already taken",
+                detail=str(e),
             )
 
     raise HTTPException(
@@ -48,20 +52,24 @@ async def register_user(
     status_code=status.HTTP_200_OK,
 )
 async def login(user: UserSchema, session: AsyncSession = Depends(get_session)):
-    user_service = AuthenticationUserService(user.username, session)
-    db_user = await user_service.get_user()
-    if not db_user:
+    try:
+        user_service = AuthenticationUserService(user.username, session)
+        db_user = await user_service.get_user()
+    except UserNotExists as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No such a user.",
+            detail=str(e),
         )
-    if db_user.check_password(user.password):
-        tokens = await user_service.authorize_user()
-        return tokens
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Incorrect password.",
-    )
+    try:
+        if db_user.check_password(user.password):
+            tokens = await user_service.authorize_user()
+            return tokens
+        raise IncorrectPasswordError
+    except IncorrectPasswordError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
 
 @router.get(
@@ -81,7 +89,14 @@ async def review_current_user(current_user: CurrentUser):
 async def refresh_access_token(
     token: Token, session: AsyncSession = Depends(get_session)
 ):
-    user = await get_current_user(token.token, session)
-    authentication_service = AuthenticationUserService(user.username, session)
-    access_token = await authentication_service.create_access_token()
-    return Token(token=access_token)
+    try:
+        user = await get_current_user(token.token, session)
+        authentication_service = AuthenticationUserService(user.username, session)
+        access_token = await authentication_service.create_access_token()
+        return Token(token=access_token)
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
