@@ -1,23 +1,37 @@
 from datetime import timedelta, datetime
-from functools import partial
 
 import jwt
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 from app.config import settings
 from app.services import ServiceFactory
 
 
-class TokenService:
+class UserService(ServiceFactory):
+    model = User
 
-    @staticmethod
-    async def __create_token(
-        expires_delta: int,
-        data: dict,
-    ) -> str:
+
+class SingleUserService(UserService):
+    def __init__(self, username: str, *args):
+        super().__init__(*args)
+        self.username = username
+
+    async def get_user(self) -> User:
+        result = await self.session.execute(
+            select(self.model).where(self.model.username == self.username)
+        )
+        user = result.scalars().first()
+        return user
+
+
+class AuthenticationUserService(SingleUserService):
+
+    async def _create_token(self,
+                            expires_delta: int,
+                            ) -> str:
         try:
+            data = {'sub': self.username}
             to_encode = data.copy()
             expire = datetime.now().replace(tzinfo=None) + timedelta(
                 minutes=expires_delta
@@ -34,41 +48,27 @@ class TokenService:
             print(f"Error creating JWT: {e}")
             raise
 
-    create_access_token = partial(
-        __create_token, settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    )
-    create_refresh_token = partial(
-        __create_token, settings.REFRESH_TOKEN_EXPIRE_MINUTES
-    )
-
-
-class UserService(ServiceFactory):
-    model = User
-
-    @classmethod
-    async def get_user_by_username(
-        cls, session: AsyncSession, username: str
-    ) -> User | None:
-        result = await session.execute(
-            select(cls.model).where(cls.model.username == username)
-        )
-        user = result.scalars().first()
-        return user
-
-    @classmethod
-    async def add_user(
-        cls, session: AsyncSession, username: str, password: str
-    ):
-        new_user = cls.model(username, password)
-        session.add(new_user)
-        return new_user
-
-    @classmethod
-    async def authorize_user(cls, username: str):
-        access_token = await TokenService.create_access_token(
-            data={"sub": username}
-        )
-        refresh_token = await TokenService.create_refresh_token(
-            data={"sub": username}
-        )
+    async def authorize_user(self):
+        access_token = await self.create_access_token()
+        refresh_token = await self.create_refresh_token()
         return {'access_token': access_token, 'refresh_token': refresh_token}
+
+    async def create_access_token(self,
+                                  expires_delta: int = settings.ACCESS_TOKEN_EXPIRE_MINUTES):
+        return await self._create_token(expires_delta)
+
+    async def create_refresh_token(self,
+                                   expires_delta: int = settings.REFRESH_TOKEN_EXPIRE_MINUTES):
+        return await self._create_token(expires_delta)
+
+
+class GlobalUserService(UserService):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    async def add_user(
+            self, username: str, password: str
+    ):
+        new_user = self.model(username, password)
+        self.session.add(new_user)
+        return new_user

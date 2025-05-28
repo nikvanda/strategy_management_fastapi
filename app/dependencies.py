@@ -12,7 +12,7 @@ from starlette import status
 import redis.asyncio as redis
 
 from app.auth.models import User
-from app.auth.services import UserService
+from app.auth.services import UserService, SingleUserService
 from app.config import settings
 
 DATABASE_URL = f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
@@ -50,7 +50,8 @@ async def get_current_user(
             raise credentials_exception
     except InvalidTokenError:
         raise credentials_exception
-    user = await UserService.get_user_by_username(session, username)
+    single_user_service = SingleUserService(username, session)
+    user = await single_user_service.get_user()
     if user is None:
         raise credentials_exception
     return user

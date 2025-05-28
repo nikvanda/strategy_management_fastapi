@@ -31,7 +31,7 @@ from app.strategy.schemas import (
 from app.strategy.services import (
     StrategyService,
     ConditionService,
-    SimulationService,
+    SimulationService, SingleStrategyService,
 )
 from app.strategy.utils import StrategyFormatter, RedisUtils
 
@@ -40,11 +40,11 @@ router = APIRouter(prefix='/strategies')
 
 @router.post('/', response_model=StrategyResponse, status_code=HTTP_201_CREATED)
 async def create_strategy(
-    current_user: CurrentUser,
-    strategy: StrategyInput,
-    session: AsyncSession = Depends(get_session),
-    redis: Redis = Depends(get_redis),
-    channel: RobustChannel = Depends(get_rabbitmq_channel),
+        current_user: CurrentUser,
+        strategy: StrategyInput,
+        session: AsyncSession = Depends(get_session),
+        redis: Redis = Depends(get_redis),
+        channel: RobustChannel = Depends(get_rabbitmq_channel),
 ):
     if not bool(strategy.name) or not bool(strategy.asset_type):
         raise HTTPException(
@@ -52,13 +52,11 @@ async def create_strategy(
             detail="Name or asset_type must not be empty.",
         )
     try:
-        new_strategy = await StrategyService.add_strategy(
-            session, strategy, current_user.id
-        )
+        strategy_service = StrategyService(session)
+        new_strategy = await strategy_service.add_strategy(strategy, current_user.id)
         if strategy.conditions:
-            await ConditionService.add_conditions(
-                session, strategy.conditions, new_strategy
-            )
+            condition_service = ConditionService(session)
+            await condition_service.add_conditions(strategy.conditions, new_strategy)
         else:
             new_strategy.conditions = []
         await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
@@ -82,9 +80,9 @@ async def create_strategy(
 
 @router.get('/', response_model=List[StrategyResponse], status_code=HTTP_200_OK)
 async def get_all_strategies(
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_session),
-    redis: Redis = Depends(get_redis),
+        current_user: CurrentUser,
+        session: AsyncSession = Depends(get_session),
+        redis: Redis = Depends(get_redis),
 ):
     cached_value = await redis.get(
         RedisUtils.get_strategy_cached_name(current_user.id)
@@ -92,7 +90,8 @@ async def get_all_strategies(
     if cached_value:
         return json.loads(cached_value)
 
-    user_strategies = await StrategyService.get_user_strategies(session, current_user.id)
+    strategy_service = StrategyService(session)
+    user_strategies = await strategy_service.get_user_strategies(current_user.id)
 
     response = [
         StrategyFormatter.format_strategy_response(strategy)
@@ -110,13 +109,12 @@ async def get_all_strategies(
     '/{strategy_id}', response_model=StrategyResponse, status_code=HTTP_200_OK
 )
 async def get_strategy(
-    strategy_id,
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_session),
+        strategy_id,
+        current_user: CurrentUser,
+        session: AsyncSession = Depends(get_session),
 ):
-    strategy = await StrategyService.get_single_strategy(
-        session, current_user.id, strategy_id
-    )
+    strategy_service = StrategyService(session)
+    strategy = await strategy_service.get_single_strategy(current_user.id, strategy_id)
     return StrategyFormatter.format_strategy_response(strategy)
 
 
@@ -124,30 +122,28 @@ async def get_strategy(
     '/{strategy_id}', response_model=StrategyResponse, status_code=HTTP_200_OK
 )
 async def update_strategy(
-    strategy_id,
-    strategy: StrategyInputOptional,
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_session),
-    redis: Redis = Depends(get_redis),
-    channel: aio_pika.RobustChannel = Depends(get_rabbitmq_channel),
+        strategy_id,
+        strategy_input: StrategyInputOptional,
+        current_user: CurrentUser,
+        session: AsyncSession = Depends(get_session),
+        redis: Redis = Depends(get_redis),
+        channel: aio_pika.RobustChannel = Depends(get_rabbitmq_channel),
 ):
-    strategy_db = await StrategyService.get_single_strategy(
-        session, current_user.id, strategy_id
-    )
+    strategy_service = SingleStrategyService(session, strategy_id=strategy_id, user_id=current_user.id)
     try:
-        await StrategyService.update(session, strategy, strategy_db)
+        strategy = await strategy_service.update(strategy_input)
         await session.commit()
-        await session.refresh(strategy_db)
+        await session.refresh(strategy)
         await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
         await channel.default_exchange.publish(
             aio_pika.Message(
                 body=json.dumps(
-                    f'User {current_user.username} updated strategy {strategy_db.name}'
+                    f'User {current_user.username} updated strategy {strategy.name}'
                 ).encode()
             ),
             routing_key=QUEUE_NAME,
         )
-        return StrategyFormatter.format_strategy_response(strategy_db)
+        return StrategyFormatter.format_strategy_response(strategy)
     except ValueError as e:
         await session.rollback()
         raise HTTPException(
@@ -158,16 +154,14 @@ async def update_strategy(
 
 @router.delete('/{strategy_id}', status_code=HTTP_204_NO_CONTENT)
 async def delete_strategy(
-    strategy_id,
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_session),
-    redis: Redis = Depends(get_redis),
+        strategy_id,
+        current_user: CurrentUser,
+        session: AsyncSession = Depends(get_session),
+        redis: Redis = Depends(get_redis),
 ):
-    strategy_db = await StrategyService.get_single_strategy(
-        session, current_user.id, strategy_id
-    )
+    strategy_service = SingleStrategyService(session, strategy_id=strategy_id, user_id=current_user.id)
     try:
-        await StrategyService.delete(session, strategy_db)
+        await strategy_service.delete()
         await session.commit()
         await redis.delete(RedisUtils.get_strategy_cached_name(current_user.id))
     except Exception as e:
@@ -185,14 +179,12 @@ async def delete_strategy(
     status_code=HTTP_200_OK,
 )
 async def simulate_strategy(
-    strategy_id,
-    data: List[HistoricalData],
-    current_user: CurrentUser,
-    session: AsyncSession = Depends(get_session),
+        strategy_id,
+        data: List[HistoricalData],
+        current_user: CurrentUser,
+        session: AsyncSession = Depends(get_session),
 ):
-    strategy_db = await StrategyService.get_single_strategy(
-        session, current_user.id, strategy_id
-    )
+    strategy_service = SimulationService(session, strategy_id=strategy_id, user_id=current_user.id)
 
     df = pd.DataFrame([item.model_dump() for item in data])
     try:
@@ -211,7 +203,7 @@ async def simulate_strategy(
         )
 
     try:
-        result = SimulationService.simulate_strategy(df, strategy_db)
+        result = await strategy_service.simulate_strategy(df)
     except TypeError:
         raise HTTPException(
             detail='Some data is in incorrect format.',

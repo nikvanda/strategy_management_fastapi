@@ -23,72 +23,56 @@ from app.strategy.schemas import (
 from app.strategy.utils import ConditionFormatter
 
 
+class ConditionService(ServiceFactory):
+    model = Condition
+
+    async def add_conditions(
+            self,
+            conditions: List[ConditionData],
+            strategy: Strategy,
+    ):
+        new_conditions = []
+        for condition in conditions:
+            if condition.type not in CONDITION_TYPES:
+                raise ValueError('Incorrect condition types.')
+
+            new_conditions.append(
+                self.model(
+                    indicator=condition.indicator,
+                    threshold=condition.threshold,
+                    type=condition.type,
+                    strategy=strategy,
+                )
+            )
+
+        strategy.conditions = new_conditions
+        self.session.add(strategy)
+        return strategy
+
+    async def delete(self, conditions: list[int] | list[Condition]):
+        if not conditions:
+            return
+
+        if isinstance(conditions[0], int):
+            await self.session.execute(
+                delete(Strategy).where(Strategy.id.in_(conditions))
+            )
+
+        if isinstance(conditions[0], Condition):
+            for condition in conditions:
+                await self.session.delete(condition)
+
+
 class StrategyService(ServiceFactory):
     model = Strategy
 
-    @classmethod
-    async def add_strategy(
-        cls,
-        session: AsyncSession,
-        strategy: StrategyInput,
-        current_user_id: int,
-    ):
-        new_strategy = cls.model(
-            name=strategy.name,
-            description=strategy.description,
-            asset_type=strategy.asset_type,
-            user_id=current_user_id,
-        )
-        session.add(new_strategy)
-        return new_strategy
-
-    @classmethod
-    async def update(
-        cls,
-        session: AsyncSession,
-        strategy_input: StrategyInputOptional,
-        strategy: Strategy,
-    ):
-        for key, value in strategy_input.model_dump(exclude_unset=True).items():
-            if key == 'conditions':
-                await ConditionService.delete(session, strategy.conditions)
-                formatted_value = [
-                    ConditionFormatter.condition_data_formatter(item)
-                    for item in value
-                ]
-                await ConditionService.add_conditions(
-                    session, formatted_value, strategy
-                )
-                continue
-            if key == 'status':
-                if value not in STATUS_TYPES:
-                    raise ValueError('Incorrect status type.')
-
-            setattr(strategy, key, value)
-
-        return strategy_input
-
-    @classmethod
-    async def get_user_strategies(cls, session: AsyncSession, user_id: int):
-        result = await session.execute(
-            select(cls.model)
-            .where(cls.model.user_id == user_id)
-            .filter(cls.model.status != 'closed')
-            .options(selectinload(cls.model.conditions))
-        )
-        strategies = result.scalars().all()
-        return strategies
-
-    @classmethod
-    async def get_single_strategy(
-        cls, session: AsyncSession, user_id: int, strategy_id: int | str
-    ):
-        result = await session.execute(
-            select(cls.model)
+    async def get_single_strategy(self, user_id: int, strategy_id: int | str) -> Strategy:
+        result = await self.session.execute(
+            select(self.model)
             .where(
-                and_(cls.model.user_id == user_id, cls.model.id == int(strategy_id))
+                and_(self.model.user_id == user_id, self.model.id == int(strategy_id))
             )
-            .options(selectinload(cls.model.conditions))
+            .options(selectinload(self.model.conditions))
         )
 
         strategy = result.scalars().first()
@@ -99,65 +83,81 @@ class StrategyService(ServiceFactory):
             )
         return strategy
 
-    @classmethod
-    async def delete(cls, session: AsyncSession, strategy: Strategy):
-        await session.delete(strategy)
+    async def get_user_strategies(self, user_id: int):
+        result = await self.session.execute(
+            select(self.model)
+            .where(self.model.user_id == user_id)
+            .filter(self.model.status != 'closed')
+            .options(selectinload(self.model.conditions))
+        )
+        strategies = result.scalars().all()
+        return strategies
 
-
-class ConditionService(ServiceFactory):
-    model = Condition
-
-    @classmethod
-    async def add_conditions(
-        cls,
-        session: AsyncSession,
-        conditions: List[ConditionData],
-        strategy: Strategy,
+    async def add_strategy(
+            self,
+            strategy: StrategyInput,
+            current_user_id: int,
     ):
-        new_conditions = []
-        for condition in conditions:
-            if condition.type not in CONDITION_TYPES:
-                raise ValueError('Incorrect condition types.')
+        new_strategy = self.model(
+            name=strategy.name,
+            description=strategy.description,
+            asset_type=strategy.asset_type,
+            user_id=current_user_id,
+        )
+        self.session.add(new_strategy)
+        return new_strategy
 
-            new_conditions.append(
-                cls.model(
-                    indicator=condition.indicator,
-                    threshold=condition.threshold,
-                    type=condition.type,
-                    strategy=strategy,
-                )
-            )
 
-        strategy.conditions = new_conditions
-        session.add(strategy)
+class SingleStrategyService(StrategyService):
+
+    def __init__(self, session: AsyncSession,
+                 strategy: Strategy | None = None,
+                 strategy_id: int | None = None,
+                 user_id: int | None = None):
+        super().__init__(session)
+        self.strategy_id = strategy_id
+        self.user_id = user_id
+
+        self._strategy = strategy if strategy else None
+        self.condition_service = ConditionService(session) if strategy or (strategy_id and user_id) else None
+
+
+    async def get_instance(self):
+        return self._strategy if self._strategy else await self.get_single_strategy(self.user_id, self.strategy_id)
+
+    async def update(self, strategy_input: StrategyInputOptional):
+        strategy = await self.get_instance()
+        for key, value in strategy_input.model_dump(exclude_unset=True).items():
+            if key == 'conditions':
+                await self.condition_service.delete(strategy.conditions)
+                formatted_value = [
+                    ConditionFormatter.condition_data_formatter(item)
+                    for item in value
+                ]
+                await self.condition_service.add_conditions(formatted_value, strategy)
+                continue
+            if key == 'status':
+                if value not in STATUS_TYPES:
+                    raise ValueError('Incorrect status type.')
+
+            setattr(strategy, key, value)
+
         return strategy
 
-    @classmethod
-    async def delete(
-        cls, session: AsyncSession, conditions: list[int] | list[Condition]
-    ):
-        if not conditions:
-            return
-
-        if isinstance(conditions[0], int):
-            await session.execute(
-                delete(Strategy).where(Strategy.id.in_(conditions))
-            )
-
-        if isinstance(conditions[0], Condition):
-            for condition in conditions:
-                await session.delete(condition)
+    async def delete(self):
+        strategy = await self.get_instance()
+        await self.session.delete(strategy)
 
 
-class SimulationService:
+class SimulationService(SingleStrategyService):
 
-    @staticmethod
-    def simulate_strategy(
-        df: pd.DataFrame, strategy: Strategy, indicator: str = 'momentum'
-    ):
+    async def simulate_strategy(self,
+                          df: pd.DataFrame, indicator: str = 'momentum'
+                          ):
         balance, position, entry_price = 0, 0, 0
         trades = []
 
+        strategy = await self.get_instance()
         st_dict = strategy.to_dict()
         st_dict['buy_conditions'] = list(
             filter(
@@ -176,8 +176,8 @@ class SimulationService:
             close_price = float(row['close'])
             try:
                 if (
-                    momentum > st_dict['buy_conditions']['threshold']
-                    and position == 0
+                        momentum > st_dict['buy_conditions']['threshold']
+                        and position == 0
                 ):
                     position = 1
                     entry_price = close_price
@@ -189,8 +189,8 @@ class SimulationService:
                         }
                     )
                 elif (
-                    momentum < st_dict['sell_conditions']['threshold']
-                    and position == 1
+                        momentum < st_dict['sell_conditions']['threshold']
+                        and position == 1
                 ):
                     profit = close_price - entry_price
                     balance += profit

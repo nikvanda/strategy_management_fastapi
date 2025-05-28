@@ -8,7 +8,7 @@ from app.auth.schemas import (
     CurrentUserSchema,
     Token,
 )
-from app.auth.services import UserService, TokenService
+from app.auth.services import AuthenticationUserService, GlobalUserService
 from app.dependencies import get_session, CurrentUser, get_current_user
 
 router = APIRouter(prefix='/auth')
@@ -20,13 +20,15 @@ router = APIRouter(prefix='/auth')
     status_code=status.HTTP_201_CREATED,
 )
 async def register_user(
-    user: UserSchema, session: AsyncSession = Depends(get_session)
+    user_input: UserSchema, session: AsyncSession = Depends(get_session)
 ):
-    if user.username and user.password:
+    if user_input.username and user_input.password:
         try:
-            await UserService.add_user(session, user.username, user.password)
+            global_user_service = GlobalUserService(session)
+            await global_user_service.add_user(user_input.username, user_input.password)
             await session.commit()
-            return await UserService.authorize_user(user.username)
+            authentication_service = AuthenticationUserService(user_input.username, session)
+            return await authentication_service.authorize_user()
         except IntegrityError:
             await session.rollback()
             raise HTTPException(
@@ -46,18 +48,15 @@ async def register_user(
     status_code=status.HTTP_200_OK,
 )
 async def login(user: UserSchema, session: AsyncSession = Depends(get_session)):
-    db_user = (
-        await UserService.get_user_by_username(session, user.username)
-        if user.username
-        else None
-    )
+    user_service = AuthenticationUserService(user.username, session)
+    db_user = await user_service.get_user()
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No such a user.",
         )
     if db_user.check_password(user.password):
-        tokens = await UserService.authorize_user(user.username)
+        tokens = await user_service.authorize_user()
         return tokens
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -83,7 +82,6 @@ async def refresh_access_token(
     token: Token, session: AsyncSession = Depends(get_session)
 ):
     user = await get_current_user(token.token, session)
-    access_token = await TokenService.create_access_token(
-        data={"sub": user.username}
-    )
+    authentication_service = AuthenticationUserService(user.username, session)
+    access_token = await authentication_service.create_access_token()
     return Token(token=access_token)
