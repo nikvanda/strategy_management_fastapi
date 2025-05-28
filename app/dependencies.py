@@ -12,7 +12,7 @@ from starlette import status
 import redis.asyncio as redis
 
 from app.auth.models import User
-from app.auth.services import UserService, SingleUserService
+from app.auth.services import SingleUserService
 from app.config import settings
 
 DATABASE_URL = f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"

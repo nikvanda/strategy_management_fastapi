@@ -57,7 +57,6 @@ class ConditionService(ServiceFactory):
         except IncorrectConditionTypeError as e:
             raise e
 
-
     async def delete(self, conditions: list[int] | list[Condition]):
         try:
             if not conditions:

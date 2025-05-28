@@ -21,7 +21,7 @@ router = APIRouter(prefix='/auth')
     status_code=status.HTTP_201_CREATED,
 )
 async def register_user(
-    user_input: UserSchema, session: AsyncSession = Depends(get_session)
+        user_input: UserSchema, session: AsyncSession = Depends(get_session)
 ):
     if user_input.username and user_input.password:
         try:
@@ -87,7 +87,7 @@ async def review_current_user(current_user: CurrentUser):
     status_code=status.HTTP_200_OK,
 )
 async def refresh_access_token(
-    token: Token, session: AsyncSession = Depends(get_session)
+        token: Token, session: AsyncSession = Depends(get_session)
 ):
     try:
         user = await get_current_user(token.token, session)
@@ -99,4 +99,3 @@ async def refresh_access_token(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-

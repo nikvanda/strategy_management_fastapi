@@ -58,6 +58,7 @@ class InvalidConditionDataStructureError(BaseConditionError):
 
         self.errors = errors
 
+
 class ConditionFailToCreateError(BaseConditionError):
     def __init__(self, message=None, condition_data=None):
         message = f'Can\'t create condition {condition_data.indicator} - {condition_data.threshold}'

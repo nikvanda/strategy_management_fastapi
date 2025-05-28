@@ -2,9 +2,8 @@ from datetime import timedelta, datetime
 
 import jwt
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
-from app.auth.exeptions import UserNotExists, UsernameIsDoubleError, JWTError
+from app.auth.exeptions import UserNotExists, JWTError
 from app.auth.models import User
 from app.config import settings
 from app.services import ServiceFactory

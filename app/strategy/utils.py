@@ -1,5 +1,5 @@
 from app.strategy.exeptions import InvalidConditionData
-from app.strategy.models import Strategy, Condition
+from app.strategy.models import Strategy
 from app.strategy.schemas import StrategyResponse, BaseCondition, ConditionData
 
 
