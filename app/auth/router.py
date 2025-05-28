@@ -2,7 +2,7 @@ from fastapi import APIRouter, status, HTTPException, Depends
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.exeptions import UserNotExists, IncorrectPasswordError, BaseUserException, JWTError, UsernameIsDoubleError
+from app.auth.exeptions import UserNotExists, IncorrectPasswordError, JWTError, UsernameIsDoubleError
 from app.auth.schemas import (
     UserSchema,
     ResponseTokens,
